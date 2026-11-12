@@ -69,6 +69,13 @@ MLiveMixAudioProcessorEditor::MLiveMixAudioProcessorEditor (MLiveMixAudioProcess
     openHereButton.setButtonText (pt ("ABRIR NESTE COMPUTADOR"));
     openHereButton.onClick = [this]
     {
+        if (remoteMode)
+        {
+            const auto url = processor.getRemoteShareUrl();
+            if (url.isNotEmpty())
+                juce::URL (url).launchInDefaultBrowser();
+            return;
+        }
         const int port = processor.getServer().getPort();
         if (port > 0)
             juce::URL ("http://localhost:" + juce::String (port) + "/").launchInDefaultBrowser();
@@ -77,7 +84,7 @@ MLiveMixAudioProcessorEditor::MLiveMixAudioProcessorEditor (MLiveMixAudioProcess
     copyButton.setButtonText ("COPIAR LINK");
     copyButton.onClick = [this]
     {
-        juce::SystemClipboard::copyTextToClipboard (getListenUrl());
+        juce::SystemClipboard::copyTextToClipboard (currentUrl());
         copyButton.setButtonText ("COPIADO!");
         juce::Timer::callAfterDelay (1500, [safe = juce::Component::SafePointer<juce::TextButton> (&copyButton)]
         {
@@ -107,13 +114,55 @@ MLiveMixAudioProcessorEditor::MLiveMixAudioProcessorEditor (MLiveMixAudioProcess
         updateStatus();
     };
 
-    for (auto* b : { &openHereButton, &copyButton, &switchNetworkButton, &retryButton, &streamButton })
+    // Tabs: local network / internet
+    localTab.setButtonText ("NA REDE (WI-FI)");
+    remoteTab.setButtonText ("REMOTO (INTERNET)");
+    localTab.onClick  = [this] { remoteMode = false; updateStatus(); resized(); repaint(); };
+    remoteTab.onClick = [this] { remoteMode = true;  updateStatus(); resized(); repaint(); };
+
+    remoteStartButton.setClickingTogglesState (true);
+    remoteStartButton.setToggleState (processor.getRemote().isOn(), juce::dontSendNotification);
+    remoteStartButton.onClick = [this]
+    {
+        if (remoteStartButton.getToggleState())
+            processor.startRemote();
+        else
+            processor.stopRemote();
+        updateStatus();
+    };
+
+    newLinkButton.setButtonText ("NOVO LINK");
+    newLinkButton.onClick = [this]
+    {
+        if (! confirmNewLink)
+        {
+            // First click asks for confirmation: the old link will stop working
+            confirmNewLink = true;
+            newLinkButton.setButtonText ("CONFIRMAR NOVO LINK?");
+            juce::Timer::callAfterDelay (4000, [safe = juce::Component::SafePointer<MLiveMixAudioProcessorEditor> (this)]
+            {
+                if (safe != nullptr && safe->confirmNewLink)
+                {
+                    safe->confirmNewLink = false;
+                    safe->newLinkButton.setButtonText ("NOVO LINK");
+                }
+            });
+            return;
+        }
+        confirmNewLink = false;
+        newLinkButton.setButtonText ("NOVO LINK");
+        processor.newRemoteLink();
+        updateStatus();
+    };
+
+    for (auto* b : { &openHereButton, &copyButton, &switchNetworkButton, &retryButton, &streamButton,
+                     &localTab, &remoteTab, &remoteStartButton, &newLinkButton })
         addAndMakeVisible (b);
 
     processor.ensureServerRunning();
     refreshAddresses();
 
-    setSize (480, 760);
+    setSize (480, 810);
     updateStatus();
     startTimerHz (15);
 }
@@ -140,8 +189,87 @@ juce::String MLiveMixAudioProcessorEditor::getListenUrl() const
     return "http://" + host + ":" + juce::String (port) + "/";
 }
 
+juce::String MLiveMixAudioProcessorEditor::currentUrl()
+{
+    return remoteMode ? processor.getRemoteShareUrl() : getListenUrl();
+}
+
 void MLiveMixAudioProcessorEditor::updateStatus()
 {
+    localTab.setToggleState (! remoteMode, juce::dontSendNotification);
+    remoteTab.setToggleState (remoteMode, juce::dontSendNotification);
+
+    for (auto* b : { &switchNetworkButton, &retryButton, &streamButton })
+        b->setVisible (! remoteMode);
+    for (auto* b : { &remoteStartButton, &newLinkButton })
+        b->setVisible (remoteMode);
+    openHereButton.setButtonText (remoteMode ? pt ("ABRIR NO NAVEGADOR") : pt ("ABRIR NESTE COMPUTADOR"));
+
+    if (remoteMode)
+    {
+        auto& remote = processor.getRemote();
+        const bool available = processor.isRemoteAvailable();
+        const auto url = available ? processor.getRemoteShareUrl() : juce::String();
+
+        qr.setText (url);
+        urlLabel.setText (url.isNotEmpty() ? url.fromFirstOccurrenceOf ("://", false, false) : pt ("—"),
+                          juce::dontSendNotification);
+        urlLabel.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
+        urlLabel.setMinimumHorizontalScale (0.6f);
+
+        remoteStartButton.setEnabled (available);
+        newLinkButton.setEnabled (available);
+        copyButton.setEnabled (available);
+        openHereButton.setEnabled (available);
+        remoteStartButton.setToggleState (remote.isOn(), juce::dontSendNotification);
+        remoteStartButton.setButtonText (remote.isOn() ? pt ("PARAR TRANSMISSÃO") : pt ("INICIAR TRANSMISSÃO"));
+
+        juce::String status;
+        using S = mlm::RemoteLink::State;
+        if (! available)
+        {
+            status = pt ("Servidor remoto ainda não configurado nesta versão");
+            statusColour = accent2;
+        }
+        else switch (remote.getState())
+        {
+            case S::off:
+                status = pt ("Desligado — clique em INICIAR TRANSMISSÃO");
+                statusColour = dim.brighter (0.3f);
+                break;
+            case S::connecting:
+                status = pt ("Conectando ao servidor…");
+                statusColour = accent2;
+                break;
+            case S::live:
+            {
+                const int n = remote.getListeners();
+                status = n == 0 ? pt ("No ar — aguardando ouvintes")
+                                : (n == 1 ? pt ("Ao vivo pela internet — 1 ouvinte")
+                                          : pt ("Ao vivo pela internet — ") + juce::String (n) + " ouvintes");
+                statusColour = n > 0 ? ok : dim.brighter (0.3f);
+                break;
+            }
+            case S::retrying:
+                status = pt ("Sem conexão — tentando de novo. ") + remote.getLastError();
+                statusColour = accent;
+                break;
+            case S::unavailable:
+            default:
+                status = remote.getLastError();
+                statusColour = accent;
+                break;
+        }
+        statusLabel.setText (status, juce::dontSendNotification);
+        statusLabel.setColour (juce::Label::textColourId, statusColour);
+        repaint (statusDot.expanded (2));
+        return;
+    }
+
+    copyButton.setEnabled (true);
+    openHereButton.setEnabled (true);
+    urlLabel.setFont (juce::Font (juce::FontOptions (17.0f, juce::Font::bold)));
+
     auto& server = processor.getServer();
     const auto url = getListenUrl();
 
@@ -246,12 +374,17 @@ void MLiveMixAudioProcessorEditor::paint (juce::Graphics& g)
     card (g, stepsArea);
     auto s = stepsArea.reduced (16, 12);
     g.setFont (juce::Font (juce::FontOptions (13.0f)));
-    const char* steps[] = {
+    const char* localSteps[] = {
         "1.  Celular na mesma rede Wi-Fi deste computador",
         "2.  Aponte a câmera para o QR Code",
         "3.  Toque em OUVIR na página que abrir",
     };
-    for (auto* line : steps)
+    const char* remoteSteps[] = {
+        "1.  Clique em INICIAR TRANSMISSÃO",
+        "2.  COPIAR LINK e mande por WhatsApp (ou QR Code)",
+        "3.  A pessoa abre o link e toca em OUVIR",
+    };
+    for (auto* line : remoteMode ? remoteSteps : localSteps)
     {
         g.setColour (text);
         g.drawText (pt (line), s.removeFromTop (20), juce::Justification::centredLeft);
@@ -259,15 +392,24 @@ void MLiveMixAudioProcessorEditor::paint (juce::Graphics& g)
     s.removeFromTop (4);
     g.setColour (dim);
     g.setFont (juce::Font (juce::FontOptions (11.5f)));
-    g.drawFittedText (pt ("Se o Mac perguntar, permita conexões de entrada para a sua DAW. "
-                          "O som da DAW não é alterado: o plugin só envia uma cópia."),
-                      s, juce::Justification::topLeft, 3);
+    g.drawFittedText (remoteMode ? pt ("O link é fixo neste projeto: quem tiver o link ouve de qualquer lugar. "
+                                       "NOVO LINK faz o link antigo parar de funcionar.")
+                                 : pt ("Se o Mac perguntar, permita conexões de entrada para a sua DAW. "
+                                       "O som da DAW não é alterado: o plugin só envia uma cópia."),
+                      s, juce::Justification::topLeft, 3, 1.0f); // wrap, never squash
 }
 
 void MLiveMixAudioProcessorEditor::resized()
 {
     auto r = getLocalBounds().reduced (20);
     r.removeFromTop (48);
+
+    auto tabs = r.removeFromTop (34);
+    const int tabW = (tabs.getWidth() - 8) / 2;
+    localTab.setBounds (tabs.removeFromLeft (tabW));
+    tabs.removeFromLeft (8);
+    remoteTab.setBounds (tabs);
+    r.removeFromTop (12);
 
     auto statusRow = r.removeFromTop (24);
     statusDot = statusRow.removeFromLeft (14).withSizeKeepingCentre (10, 10);
@@ -290,10 +432,13 @@ void MLiveMixAudioProcessorEditor::resized()
     r.removeFromTop (8);
 
     auto second = r.removeFromTop (36);
-    streamButton.setBounds (second.removeFromLeft (w));
+    const auto secondLeft = second.removeFromLeft (w);
     second.removeFromLeft (8);
+    streamButton.setBounds (secondLeft);
     switchNetworkButton.setBounds (second);
     retryButton.setBounds (second);
+    remoteStartButton.setBounds (secondLeft);
+    newLinkButton.setBounds (second);
     r.removeFromTop (12);
 
     meterArea = r.removeFromTop (64);

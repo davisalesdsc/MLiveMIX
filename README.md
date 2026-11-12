@@ -29,6 +29,36 @@ Na primeira vez, o macOS pode perguntar se a DAW pode **aceitar conexões de ent
 - Reconecta sozinha se a rede cair ou se a DAW for reaberta.
 - No iPhone, toca mesmo com a chave de silencioso ligada. Mantenha a tela ligada enquanto ouve.
 
+## Escuta remota (internet)
+
+Na aba **REMOTO (INTERNET)** do plugin:
+
+1. Clique em **INICIAR TRANSMISSÃO**.
+2. **COPIAR LINK** e mande por WhatsApp (ou mostre o QR Code).
+3. A pessoa abre o link de qualquer lugar e toca em **OUVIR**.
+
+- O link é **fixo por projeto**: mande uma vez, vale sempre. **NOVO LINK** invalida o anterior.
+- Só quem tem o link ouve (o link tem 128 bits aleatórios) e só este plugin consegue transmitir
+  nele (chave secreta guardada no projeto).
+- O áudio só sai do computador enquanto há alguém ouvindo; atraso típico de 0,5–1 s.
+
+Como funciona: o plugin faz uma conexão **de saída** (funciona atrás de qualquer roteador) para um
+servidor na nuvem (`relay/`, Cloudflare Workers + Durable Objects), que repassa o áudio aos ouvintes.
+
+### Publicar o servidor (uma vez)
+
+1. Crie uma conta gratuita em [dash.cloudflare.com](https://dash.cloudflare.com) e, em **Workers & Pages**,
+   escolha o seu subdomínio `*.workers.dev`.
+2. Crie um token em **My Profile → API Tokens → Create Token → "Edit Cloudflare Workers"**.
+3. No GitHub: **Settings → Secrets and variables → Actions**:
+   - secret `CLOUDFLARE_API_TOKEN` = o token;
+   - variável `CLOUDFLARE_ACCOUNT_ID` = o Account ID (painel da Cloudflare).
+4. Rode o workflow **Relay (Cloudflare)** (aba Actions). Ele testa, publica e mostra o endereço.
+5. Crie a variável `MLIVEMIX_RELAY_URL` com esse endereço. Os próximos builds do plugin já saem
+   com o Remoto apontando para ele.
+
+O plano gratuito da Cloudflare cobre várias horas de transmissão por dia; o plano pago custa US$ 5/mês.
+
 ## Como funciona
 
 ```
@@ -61,7 +91,6 @@ sudo installer -pkg ~/Downloads/MLiveMIX-v0.1.0-macOS.pkg -target /
 
 ## Limitações desta versão (0.1)
 
-- **Só na rede local** (mesmo Wi-Fi). Link pela internet para clientes à distância está no roteiro.
 - **Saída direta para Bluetooth/fone secundário** a partir do plugin está no roteiro. Hoje dá para usar
   o Chrome do Mac com o fone Bluetooth conectado ao Mac.
 - Pro Tools exige formato AAX (precisa de conta de desenvolvedor Avid).

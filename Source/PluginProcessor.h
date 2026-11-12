@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "net/AudioTap.h"
 #include "net/StreamServer.h"
+#include "net/RemoteLink.h"
 
 /**
     MLiveMIX: put it on the master bus. The audio passes through untouched (the DAW keeps
@@ -49,6 +50,18 @@ public:
     void setStreaming (bool on)                { tap.setEnabled (on); }
     bool isStreaming() const noexcept          { return tap.isEnabled(); }
 
+    //==============================================================================
+    // Remote (internet) listening
+    mlm::RemoteLink& getRemote() noexcept { return remote; }
+    bool isRemoteAvailable() const        { return getRelayBase().isNotEmpty(); }
+    void startRemote();
+    void stopRemote()                     { remote.stop(); }
+    /** New room + key: the old link stops working. */
+    void newRemoteLink();
+    static juce::String getRelayBase();
+    /** Fixed listening link of this project (creates the room on first use). */
+    juce::String getRemoteShareUrl()      { ensureRemoteIdentity(); return remote.getShareUrl(); }
+
     /** Which LAN address the QR code shows (remembered with the session). */
     juce::String preferredAddress;
 
@@ -56,8 +69,12 @@ public:
     std::atomic<bool> audioIsRunning { false };
 
 private:
+    void ensureRemoteIdentity();
+
     mlm::AudioTap tap;
+    mlm::RemoteLink remote;            // declared before the server: outlives it
     mlm::StreamServer server { tap };
+    juce::String remoteRoom, remoteKey;
     std::atomic<juce::uint32> lastProcessMs { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MLiveMixAudioProcessor)

@@ -1,16 +1,58 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+#ifndef MLIVEMIX_RELAY_URL
+ #define MLIVEMIX_RELAY_URL ""
+#endif
+
 MLiveMixAudioProcessor::MLiveMixAudioProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
 {
+    server.setRemote (&remote);
 }
 
 MLiveMixAudioProcessor::~MLiveMixAudioProcessor()
 {
+    server.setRemote (nullptr);
     server.stop();
+    remote.stop();
+}
+
+juce::String MLiveMixAudioProcessor::getRelayBase()
+{
+    // Built-in server (set when the plugin is compiled), overridable for testing
+    const auto env = juce::SystemStats::getEnvironmentVariable ("MLIVEMIX_RELAY_URL", {});
+    return env.isNotEmpty() ? env : juce::String (MLIVEMIX_RELAY_URL);
+}
+
+void MLiveMixAudioProcessor::ensureRemoteIdentity()
+{
+    if (remoteRoom.isEmpty() || remoteKey.isEmpty())
+    {
+        remoteRoom = mlm::RemoteLink::makeRandomId (16); // 128-bit, unguessable link
+        remoteKey  = mlm::RemoteLink::makeRandomId (24); // secret that lets only this plugin transmit
+    }
+    remote.configure (getRelayBase(), remoteRoom, remoteKey);
+}
+
+void MLiveMixAudioProcessor::startRemote()
+{
+    ensureRemoteIdentity();
+    ensureServerRunning(); // the sender thread feeds the remote link
+    remote.start();
+}
+
+void MLiveMixAudioProcessor::newRemoteLink()
+{
+    const bool wasOn = remote.isOn();
+    remote.stop();
+    remoteRoom.clear();
+    remoteKey.clear();
+    ensureRemoteIdentity();
+    if (wasOn)
+        remote.start();
 }
 
 bool MLiveMixAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -58,6 +100,8 @@ void MLiveMixAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
     juce::ValueTree state ("MLiveMIX");
     state.setProperty ("streaming", isStreaming(), nullptr);
     state.setProperty ("address", preferredAddress, nullptr);
+    state.setProperty ("room", remoteRoom, nullptr);
+    state.setProperty ("roomKey", remoteKey, nullptr);
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
@@ -71,6 +115,9 @@ void MLiveMixAudioProcessor::setStateInformation (const void* data, int sizeInBy
         {
             setStreaming ((bool) state.getProperty ("streaming", true));
             preferredAddress = state.getProperty ("address", "").toString();
+            remoteRoom = state.getProperty ("room", "").toString();
+            remoteKey = state.getProperty ("roomKey", "").toString();
+            ensureRemoteIdentity();
         }
     }
 }

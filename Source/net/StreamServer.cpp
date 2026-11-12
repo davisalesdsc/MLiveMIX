@@ -299,8 +299,11 @@ public:
                 pending.insert (pending.end(), chunk.begin(), chunk.begin() + got * 2);
             }
 
+            auto* remote = owner.remote.load();
+            const bool remoteWants = remote != nullptr && remote->wantsAudio();
+
             // Nobody listening: throw the audio away, so a new listener starts "live", not with old audio
-            if (owner.listeners.load() == 0)
+            if (owner.listeners.load() == 0 && ! remoteWants)
                 pending.clear();
 
             // Never let a backlog build up (e.g. a stalled thread)
@@ -316,6 +319,8 @@ public:
                     owner.broadcast (ws::makeFrame (ws::binary, packet.getData(), packet.getSize()));
                     owner.packetsSent.fetch_add (1);
                 }
+                if (remoteWants)
+                    remote->pushAudio (pending.data(), framesPerPacket, sr);
                 ++sequence;
                 pending.erase (pending.begin(), pending.begin() + framesPerPacket * 2);
             }

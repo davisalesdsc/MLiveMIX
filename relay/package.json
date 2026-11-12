@@ -1,0 +1,17 @@
+{
+  "name": "mlivemix-relay",
+  "private": true,
+  "version": "0.1.0",
+  "description": "MLiveMIX remote listening relay (Cloudflare Worker + Durable Object)",
+  "type": "module",
+  "scripts": {
+    "build": "node build-page.mjs",
+    "dev": "node build-page.mjs && wrangler dev",
+    "deploy": "node build-page.mjs && wrangler deploy",
+    "test": "node test-relay.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "4.152.0",
+    "ws": "8.18.0"
+  }
+}

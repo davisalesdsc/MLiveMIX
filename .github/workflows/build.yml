@@ -31,7 +31,8 @@ jobs:
             libxcursor-dev libxext-dev libfontconfig1-dev libfreetype-dev libgl1-mesa-dev
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DMLIVEMIX_RELAY_URL="${{ vars.MLIVEMIX_RELAY_URL }}"
 
       - name: Build
         run: cmake --build build --config Release --parallel 4
@@ -44,6 +45,22 @@ jobs:
           else
             ./build/MLiveMixTests_artefacts/Release/MLiveMixTests
           fi
+
+      # Remote listening: run the relay locally (same runtime as Cloudflare) and test
+      # plugin -> relay -> listener with this platform's WebSocket client
+      # (macOS: NSURLSession, Windows: WinHTTP, Linux: our own client)
+      - name: Remote relay tests
+        shell: bash
+        run: |
+          cd relay
+          npm ci --no-audit --no-fund
+          node build-page.mjs
+          WRANGLER_SEND_METRICS=false CI=1 npx wrangler dev --ip 127.0.0.1 --port 8787 > ../wrangler.log 2>&1 &
+          for i in $(seq 1 90); do curl -s -o /dev/null http://127.0.0.1:8787/ && break; sleep 1; done
+          node test-relay.mjs
+          cd ..
+          if [ "$RUNNER_OS" == "Windows" ]; then T=./build/MLiveMixTests_artefacts/Release/MLiveMixTests.exe; else T=./build/MLiveMixTests_artefacts/Release/MLiveMixTests; fi
+          $T --remote-test http://127.0.0.1:8787
 
       - name: Load the VST3 like a DAW (Linux)
         if: runner.os == 'Linux'
@@ -59,6 +76,11 @@ jobs:
           sleep 2
           node tests/browser-e2e.js 18900
           node tests/browser-e2e.js 18900 mobile
+          wait
+          ROOM=ciRoom${GITHUB_RUN_ID}abcdefgh; KEY=ciKey0123456789abcdefghij
+          ./build/MLiveMixTests_artefacts/Release/MLiveMixTests --serve-remote 14 http://127.0.0.1:8787 $ROOM $KEY &
+          sleep 3
+          node tests/browser-e2e.js "http://127.0.0.1:8787/r/$ROOM"
           wait
 
       - name: Resolve version

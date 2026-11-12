@@ -2,6 +2,7 @@
 
 #include <juce_core/juce_core.h>
 #include "AudioTap.h"
+#include "RemoteLink.h"
 #include <atomic>
 #include <deque>
 
@@ -35,6 +36,9 @@ public:
     juce::uint64 getPacketsSent() const noexcept { return packetsSent.load(); }
     juce::String getLastError() const;
 
+    /** Also feed the audio to a remote link (internet listening). nullptr to detach. */
+    void setRemote (RemoteLink* r) noexcept { remote.store (r); }
+
     /** Page served at "/" (defaults to the embedded web page). */
     void setPage (const juce::String& html);
 
@@ -64,6 +68,7 @@ private:
     std::atomic<int> port { 0 };
     std::atomic<int> listeners { 0 };
     std::atomic<juce::uint64> packetsSent { 0 };
+    std::atomic<RemoteLink*> remote { nullptr };
 
     mutable juce::CriticalSection errorLock;
     juce::String lastError;

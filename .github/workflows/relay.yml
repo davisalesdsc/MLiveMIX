@@ -1,0 +1,48 @@
+name: Relay (Cloudflare)
+
+# Deploys the remote-listening relay (relay/) to Cloudflare Workers.
+# Needs, in the repository settings (Settings -> Secrets and variables -> Actions):
+#   secret   CLOUDFLARE_API_TOKEN   (Cloudflare template "Edit Cloudflare Workers")
+#   variable CLOUDFLARE_ACCOUNT_ID
+# After the first deploy, set the variable MLIVEMIX_RELAY_URL to the URL printed below,
+# so the plugin builds point to it.
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'relay/**', 'Web/index.html', '.github/workflows/relay.yml' ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test the relay locally first
+        working-directory: relay
+        run: |
+          npm ci --no-audit --no-fund
+          node build-page.mjs
+          WRANGLER_SEND_METRICS=false CI=1 npx wrangler dev --ip 127.0.0.1 --port 8787 > ../wrangler.log 2>&1 &
+          for i in $(seq 1 90); do curl -s -o /dev/null http://127.0.0.1:8787/ && break; sleep 1; done
+          node test-relay.mjs
+
+      - name: Deploy to Cloudflare
+        if: ${{ env.CLOUDFLARE_API_TOKEN != '' }}
+        working-directory: relay
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx wrangler deploy | tee deploy.log
+          URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)
+          echo "Relay URL: $URL"
+          echo "### Servidor remoto publicado: $URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "Defina a variável MLIVEMIX_RELAY_URL = $URL" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Not deployed (no Cloudflare token yet)
+        if: ${{ env.CLOUDFLARE_API_TOKEN == '' }}
+        run: echo "::warning::CLOUDFLARE_API_TOKEN não configurado — o relay foi testado mas não publicado."
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

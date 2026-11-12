@@ -10,6 +10,7 @@
 #include "net/WebSocket.h"
 #include "net/StreamServer.h"
 #include "net/NetUtil.h"
+#include "net/RemoteLink.h"
 #include "ui/QrCodeComponent.h"
 #include <iostream>
 
@@ -95,10 +96,12 @@ struct TestClient
         return false;
     }
 
-    bool openWebSocket (int port, juce::String& headerOut)
+    bool openWebSocket (int port, juce::String& headerOut, const juce::String& path = "/ws",
+                        const juce::String& host = "127.0.0.1")
     {
-        if (! connect (port)) return false;
-        send ("GET /ws HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        if (! socket.connect (host, port, 2000)) return false;
+        send ("GET " + path + " HTTP/1.1\r\nHost: " + host + ":" + juce::String (port)
+              + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
               "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n");
         headerOut = readHttpHeader();
         return headerOut.startsWith ("HTTP/1.1 101");
@@ -320,6 +323,126 @@ void serverTests()
     check (! server.isRunning() && server.getPort() == 0, "server stops cleanly");
 }
 
+
+/** Plugin -> relay -> listener, against a relay running locally (wrangler dev). */
+void remoteTests (const juce::String& relayBase)
+{
+    std::cout << "Remote tests (relay " << relayBase << ")" << std::endl;
+    const double sr = 48000.0;
+    const auto hostPort = relayBase.fromFirstOccurrenceOf ("://", false, false);
+    const auto relayHost = hostPort.upToFirstOccurrenceOf (":", false, false);
+    const int relayPort = hostPort.fromFirstOccurrenceOf (":", false, false).getIntValue();
+
+    AudioTap tap;
+    tap.setSampleRate (sr);
+    StreamServer server (tap);
+    RemoteLink remote;
+    server.setRemote (&remote);
+    server.start (19800, 20);
+
+    const auto room = RemoteLink::makeRandomId (16), key = RemoteLink::makeRandomId (24);
+    remote.configure (relayBase, room, key);
+    check (remote.getShareUrl() == relayBase + "/r/" + room && room.length() >= 21, "share link " + remote.getShareUrl());
+    remote.start();
+
+    auto waitFor = [] (std::function<bool()> cond, int ms)
+    {
+        const auto end = juce::Time::getMillisecondCounter() + (juce::uint32) ms;
+        while (! cond() && juce::Time::getMillisecondCounter() < end) juce::Thread::sleep (20);
+        return cond();
+    };
+    check (waitFor ([&] { return remote.getState() == RemoteLink::State::live; }, 10000),
+           "plugin connected to the relay (" + remote.getLastError() + ")");
+
+    TestClient listener;
+    juce::String header;
+    check (listener.openWebSocket (relayPort, header, "/r/" + room + "/ws", relayHost), "listener opens the link");
+    check (waitFor ([&] { return remote.getListeners() == 1; }, 5000), "plugin sees 1 remote listener");
+
+    // Expected tone (same generator as pushTone)
+    std::vector<juce::int16> expL, expR;
+    {
+        double ph = 0.0;
+        for (int k = 0; k < (int) sr * 4; ++k)
+        {
+            expL.push_back ((juce::int16) juce::roundToInt (0.5f * (float) std::sin (ph * 440.0) * 32767.0f));
+            expR.push_back ((juce::int16) juce::roundToInt (0.5f * (float) std::sin (ph * 660.0) * 32767.0f));
+            ph += juce::MathConstants<double>::twoPi / sr;
+        }
+    }
+    double phase = 0.0;
+    std::thread producer ([&] { pushTone (tap, 3.0, sr, phase); });
+
+    bool helloOk = false, exact = true, seqOk = true;
+    int packets = 0, offset = -1;
+    juce::uint32 lastSeq = 0;
+    const auto end = juce::Time::getMillisecondCounter() + 5000;
+    while (packets < 15 && juce::Time::getMillisecondCounter() < end)
+    {
+        ws::Frame f;
+        if (! listener.readFrame (f, 1000)) continue;
+        if (f.opcode == ws::text)
+        {
+            const auto t = f.payload.toString();
+            if (t.contains ("\"sampleRate\":48000") && t.contains ("\"remote\":true")) helloOk = true;
+            continue;
+        }
+        const auto* d = static_cast<const juce::uint8*> (f.payload.getData());
+        const juce::uint32 seq = (juce::uint32) (d[8] | d[9] << 8 | d[10] << 16 | d[11] << 24);
+        const int frames = (int) (f.payload.getSize() - 16) / 4;
+        if (frames != 4800) { exact = false; break; }
+        if (packets > 0 && seq != lastSeq + 1) seqOk = false;
+        lastSeq = seq;
+        auto L = [d] (int i) { return (juce::int16) (d[16 + i * 4] | d[17 + i * 4] << 8); };
+        auto R = [d] (int i) { return (juce::int16) (d[18 + i * 4] | d[19 + i * 4] << 8); };
+        if (offset < 0)
+            for (int o = 0; o < (int) sr * 2 && offset < 0; ++o)
+            {
+                bool m = true;
+                for (int i = 0; i < 16 && m; ++i) m = L (i) == expL[(size_t) (o + i)] && R (i) == expR[(size_t) (o + i)];
+                if (m) offset = o;
+            }
+        if (offset < 0) { exact = false; break; }
+        for (int i = 0; i < frames && exact; ++i)
+        {
+            const size_t idx = (size_t) (offset + packets * 4800 + i);
+            exact = idx < expL.size() && L (i) == expL[idx] && R (i) == expR[idx];
+        }
+        ++packets;
+    }
+    producer.join();
+    check (helloOk, "listener got the sample rate through the relay");
+    check (packets == 15 && exact && seqOk,
+           "15 packets of 100 ms via the internet relay: every sample identical, no gaps (" + juce::String (packets) + ")");
+
+    // Another computer (different key) cannot take over the same link
+    RemoteLink intruder;
+    intruder.configure (relayBase, room, RemoteLink::makeRandomId (24));
+    intruder.start();
+    const bool refused = waitFor ([&] { return intruder.getLastError().contains ("outro computador"); }, 8000);
+    check (refused, "a different key is refused (\"" + intruder.getLastError() + "\")");
+    intruder.stop();
+
+    // Stopping tells the listener
+    remote.stop();
+    bool toldOffline = false;
+    const auto end2 = juce::Time::getMillisecondCounter() + 4000;
+    while (! toldOffline && juce::Time::getMillisecondCounter() < end2)
+    {
+        ws::Frame f;
+        if (listener.readFrame (f, 500) && f.opcode == ws::text && f.payload.toString().contains ("\"online\":false"))
+            toldOffline = true;
+    }
+    check (toldOffline && remote.getState() == RemoteLink::State::off, "stopping the transmission tells the listener");
+
+    // Same key again later: the link keeps working (fixed link)
+    remote.start();
+    check (waitFor ([&] { return remote.getState() == RemoteLink::State::live; }, 10000), "transmission restarts on the same link");
+    remote.stop();
+    server.setRemote (nullptr);
+    server.stop();
+}
+
 void processorTests()
 {
     std::cout << "Plugin tests" << std::endl;
@@ -382,11 +505,42 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    if (mode == "--remote-test" && argc > 2)
+    {
+        remoteTests (juce::String (argv[2]));
+        std::cout << (failures == 0 ? "REMOTE TESTS PASSED" : juce::String (failures) + " REMOTE TEST(S) FAILED") << std::endl;
+        return failures == 0 ? 0 : 1;
+    }
+
+    if (mode == "--serve-remote" && argc > 5)
+    {
+        // --serve-remote <seconds> <relayBase> <room> <key>: tone through the relay (browser test)
+        AudioTap tap;
+        tap.setSampleRate (48000.0);
+        StreamServer server (tap);
+        RemoteLink remote;
+        server.setRemote (&remote);
+        server.start (19900, 20);
+        remote.configure (juce::String (argv[3]), juce::String (argv[4]), juce::String (argv[5]));
+        remote.start();
+        std::cout << "remote link: " << remote.getShareUrl() << std::endl;
+        double phase = 0.0;
+        pushTone (tap, juce::String (argv[2]).getDoubleValue(), 48000.0, phase);
+        std::cout << "remote packets sent: " << remote.getPacketsSent() << ", listeners at end: " << remote.getListeners() << std::endl;
+        remote.stop();
+        server.setRemote (nullptr);
+        server.stop();
+        return 0;
+    }
+
     if (mode == "--snapshot" && argc > 2)
     {
         MLiveMixAudioProcessor proc;
         proc.prepareToPlay (48000.0, 512);
         std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
+        if (argc > 3 && juce::String (argv[3]) == "remote")
+            if (auto* e = dynamic_cast<MLiveMixAudioProcessorEditor*> (editor.get()))
+                e->setRemoteMode (true);
         const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 2.0f);
         juce::File out { juce::String (argv[2]) };
         out.deleteFile();

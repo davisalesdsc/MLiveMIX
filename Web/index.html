@@ -110,13 +110,27 @@
 (() => {
   "use strict";
   const $ = (id) => document.getElementById(id);
-  const stats = { connected: false, packets: 0, underruns: 0, dropped: 0, scheduled: 0, sampleRate: 0,
+  const stats = { remote: false, connected: false, packets: 0, underruns: 0, dropped: 0, scheduled: 0, sampleRate: 0,
                   latency: 0, errors: [], playing: false, lastPeak: [0, 0] };
   window.__mlive = stats; // read by automated tests
+  stats.remote = /^\/r\//.test(location.pathname);
 
   let ctx = null, gain = null, analysers = null, ws = null, playing = false;
   let nextTime = 0, target = 0.25, mode = "stereo", reconnectTimer = null, silentEl = null, wakeLock = null;
   let lastPacketAt = 0;
+  let hostOnline = true;
+
+  // Remote listening goes through the relay at /r/<room>; on the local network the page is at /
+  const roomMatch = location.pathname.match(/^\/r\/([A-Za-z0-9_-]+)/);
+  const remote = !!roomMatch;
+  const wsPath = remote ? "/r/" + roomMatch[1] + "/ws" : "/ws";
+  if (remote) {
+    // Internet needs a bigger buffer than Wi-Fi
+    const lat = document.querySelectorAll("#latSeg button");
+    lat[0].dataset.v = "0.3"; lat[1].dataset.v = "0.6"; lat[2].dataset.v = "1.2";
+    target = 0.6;
+    document.querySelector(".tag").textContent = "ao vivo · remoto";
+  }
 
   // ---- UI --------------------------------------------------------------------------------------
   function setStatus(text, level) {
@@ -219,7 +233,7 @@
   function connect() {
     if (!playing) return;
     setStatus("Conectando…", "warn");
-    const url = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
+    const url = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + wsPath;
     try { ws = new WebSocket(url); } catch (e) { scheduleReconnect(); return; }
     ws.binaryType = "arraybuffer";
     ws.onopen = () => { stats.connected = true; setStatus("Conectado — aguardando áudio", "warn"); };
@@ -227,7 +241,13 @@
       if (typeof ev.data === "string") {
         try {
           const m = JSON.parse(ev.data);
-          if (m.type === "hello") $("rate").textContent = (m.sampleRate / 1000).toFixed(1).replace(".", ",") + " kHz";
+          if (m.type === "hello" && m.sampleRate > 0)
+            $("rate").textContent = (m.sampleRate / 1000).toFixed(1).replace(".", ",") + " kHz";
+          if (m.type === "host") {
+            hostOnline = !!m.online;
+            if (!hostOnline) setStatus("Aguardando o produtor iniciar a transmissão", "warn");
+            else setStatus("Conectado — aguardando áudio", "warn");
+          }
         } catch (e) {}
         return;
       }
@@ -321,7 +341,7 @@
     $("latency").textContent = Math.round(stats.latency * 1000) + " ms";
     $("buffer").textContent = Math.round(ahead * 1000) + " ms";
     $("drops").textContent = String(stats.underruns + stats.dropped);
-    if (stats.connected && performance.now() - lastPacketAt > 1500 && stats.packets > 0)
+    if (stats.connected && hostOnline && performance.now() - lastPacketAt > 1500 && stats.packets > 0)
       setStatus("Conectado — DAW parada ou sem áudio", "warn");
   }, 250);
 

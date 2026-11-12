@@ -14,6 +14,9 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
+    /** Shows the REMOTO (internet) tab instead of the local one. */
+    void setRemoteMode (bool shouldShowRemote) { remoteMode = shouldShowRemote; updateStatus(); resized(); repaint(); }
+
     /** Address shown in the QR code ("http://192.168.0.10:8800/"). Exposed for tests. */
     juce::String getListenUrl() const;
 
@@ -36,6 +39,12 @@ private:
     mlm::QrCodeComponent qr;
     juce::Label urlLabel, statusLabel;
     juce::TextButton openHereButton, copyButton, switchNetworkButton, retryButton, streamButton;
+    juce::TextButton localTab, remoteTab, remoteStartButton, newLinkButton;
+    bool remoteMode = false;
+    bool confirmNewLink = false;
+
+    /** The link shown/copied in the current tab. */
+    juce::String currentUrl();
 
     juce::StringArray addresses;
     int addressIndex = 0;

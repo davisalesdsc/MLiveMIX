@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.22)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS version")
 set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Universal binary (Apple Silicon + Intel)")
 
-project(MLiveMIX VERSION 0.1.1 LANGUAGES C CXX)
+project(MLiveMIX VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -56,13 +56,28 @@ set(MLIVEMIX_SOURCES
     Source/net/WebSocket.cpp
     Source/net/StreamServer.cpp
     Source/net/NetUtil.cpp
+    Source/net/RemoteLink.cpp
+    Source/net/WsClient.cpp
+    Source/net/WsClientWindows.cpp
     Source/ui/QrCodeComponent.cpp
     third_party/qrcodegen/qrcodegen.cpp)
+
+# Remote listening (internet): the plugin connects out to this relay (see relay/).
+# e.g. -DMLIVEMIX_RELAY_URL=https://mlivemix-relay.<sua-conta>.workers.dev
+set(MLIVEMIX_RELAY_URL "" CACHE STRING "Remote listening relay base URL")
+message(STATUS "MLiveMIX relay: '${MLIVEMIX_RELAY_URL}'")
+
+if(APPLE)
+    # NSURLSessionWebSocketTask client (TLS by the system), compiled with ARC
+    list(APPEND MLIVEMIX_SOURCES Source/net/WsClientApple.mm)
+    set_source_files_properties(Source/net/WsClientApple.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+endif()
 
 target_sources(MLiveMIX PRIVATE ${MLIVEMIX_SOURCES})
 target_include_directories(MLiveMIX PRIVATE Source third_party)
 
 target_compile_definitions(MLiveMIX PUBLIC
+    MLIVEMIX_RELAY_URL="${MLIVEMIX_RELAY_URL}"
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
@@ -70,6 +85,9 @@ target_compile_definitions(MLiveMIX PUBLIC
 
 if(MSVC)
     target_compile_options(MLiveMIX PRIVATE /utf-8)
+endif()
+if(WIN32)
+    target_link_libraries(MLiveMIX PRIVATE winhttp)
 endif()
 
 target_link_libraries(MLiveMIX
@@ -95,11 +113,15 @@ if(MLIVEMIX_BUILD_TESTS)
     target_compile_definitions(MLiveMixTests PRIVATE
         JucePlugin_Name="MLiveMIX"
         JucePlugin_VersionString="${PROJECT_VERSION}"
+        MLIVEMIX_RELAY_URL="${MLIVEMIX_RELAY_URL}"
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_STANDALONE_APPLICATION=1)
     if(MSVC)
         target_compile_options(MLiveMixTests PRIVATE /utf-8)
+    endif()
+    if(WIN32)
+        target_link_libraries(MLiveMixTests PRIVATE winhttp)
     endif()
     target_link_libraries(MLiveMixTests PRIVATE
         MLiveMixWeb
