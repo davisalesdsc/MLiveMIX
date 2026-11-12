@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>MLiveMIX</title>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #171b24; --edge: #262c3b; --text: #e6e9f2; --dim: #8b93a7;
+    --accent: #ff4d6d; --accent2: #ffb84d; --ok: #36e2b4; --warn: #ffb84d; --bad: #ff4d6d;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  body { min-height: 100vh; display: flex; justify-content: center;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
+  main { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 14px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; }
+  .brand { font-weight: 800; font-size: 26px; letter-spacing: 0.5px; }
+  .brand span { color: var(--accent); }
+  .tag { color: var(--dim); font-size: 13px; }
+  .card { background: var(--panel); border: 1px solid var(--edge); border-radius: 16px; padding: 16px; }
+  #play { width: 100%; aspect-ratio: 1 / 0.62; border: 0; border-radius: 20px; cursor: pointer;
+    background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #120a0d;
+    font-size: 34px; font-weight: 800; letter-spacing: 2px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 6px; box-shadow: 0 10px 30px rgba(255, 77, 109, 0.25); }
+  #play small { font-size: 14px; font-weight: 600; letter-spacing: 0; opacity: 0.8; }
+  #play.on { background: var(--panel); color: var(--text); border: 2px solid var(--accent); box-shadow: none; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .status { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--dim); }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .dot.warn { background: var(--warn); }
+  .dot.bad { background: var(--bad); }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+  .stat { background: var(--bg); border-radius: 10px; padding: 8px; text-align: center; }
+  .stat b { display: block; font-size: 16px; }
+  .stat i { font-style: normal; color: var(--dim); font-size: 11px; }
+  .label { color: var(--dim); font-size: 12px; font-weight: 700; letter-spacing: 1px; margin-bottom: 8px; }
+  .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
+  .seg button { border: 1px solid var(--edge); background: var(--bg); color: var(--dim); border-radius: 10px;
+    padding: 10px 4px; font-weight: 700; font-size: 13px; cursor: pointer; }
+  .seg button.sel { background: var(--accent); border-color: var(--accent); color: #120a0d; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .meters { display: grid; gap: 6px; }
+  .meter { height: 10px; background: var(--bg); border-radius: 5px; overflow: hidden; }
+  .meter div { height: 100%; width: 0%; background: linear-gradient(90deg, var(--ok), var(--accent2) 75%, var(--bad)); }
+  .hint { color: var(--dim); font-size: 12px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="brand">MLive<span>MIX</span></div>
+    <div class="tag">mix ao vivo</div>
+  </header>
+
+  <button id="play" aria-label="Ouvir">OUVIR<small>toque para ouvir a mix</small></button>
+
+  <section class="card">
+    <div class="row">
+      <div class="status"><div id="dot" class="dot"></div><span id="statusText">Parado</span></div>
+      <span class="tag" id="rate">—</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><b id="latency">—</b><i>atraso</i></div>
+      <div class="stat"><b id="buffer">—</b><i>buffer</i></div>
+      <div class="stat"><b id="drops">0</b><i>falhas</i></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="label">NÍVEL</div>
+    <div class="meters">
+      <div class="meter"><div id="mL"></div></div>
+      <div class="meter"><div id="mR"></div></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="label">VOLUME</div>
+    <input id="volume" type="range" min="0" max="100" value="100" aria-label="Volume">
+  </section>
+
+  <section class="card">
+    <div class="label">ESCUTA</div>
+    <div class="seg" id="modeSeg">
+      <button data-v="stereo" class="sel">ESTÉREO</button>
+      <button data-v="mono">MONO</button>
+      <button data-v="left">L</button>
+      <button data-v="right">R</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="label">ATRASO</div>
+    <div class="seg" id="latSeg">
+      <button data-v="0.12">BAIXO</button>
+      <button data-v="0.25" class="sel">NORMAL</button>
+      <button data-v="0.6">ESTÁVEL</button>
+    </div>
+    <p class="hint">Se o som falhar, use <b>ESTÁVEL</b> (Wi-Fi fraco). No celular, mantenha a tela ligada.
+      No iPhone, aumente o volume pelos botões laterais.</p>
+  </section>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const stats = { connected: false, packets: 0, underruns: 0, dropped: 0, scheduled: 0, sampleRate: 0,
+                  latency: 0, errors: [], playing: false, lastPeak: [0, 0] };
+  window.__mlive = stats; // read by automated tests
+
+  let ctx = null, gain = null, analysers = null, ws = null, playing = false;
+  let nextTime = 0, target = 0.25, mode = "stereo", reconnectTimer = null, silentEl = null, wakeLock = null;
+  let lastPacketAt = 0;
+
+  // ---- UI --------------------------------------------------------------------------------------
+  function setStatus(text, level) {
+    $("statusText").textContent = text;
+    $("dot").className = "dot " + (level || "");
+  }
+
+  function segment(id, onPick) {
+    const seg = $(id);
+    seg.addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      for (const x of seg.querySelectorAll("button")) x.classList.toggle("sel", x === b);
+      onPick(b.dataset.v);
+    });
+  }
+  segment("modeSeg", (v) => { mode = v; });
+  segment("latSeg", (v) => { target = parseFloat(v); nextTime = 0; });
+
+  $("volume").addEventListener("input", () => {
+    if (gain) gain.gain.value = Math.pow($("volume").value / 100, 2);
+  });
+
+  $("play").addEventListener("click", () => (playing ? stop() : start()));
+
+  // ---- iPhone: keep playing with the silent switch on --------------------------------------------
+  // A (silent) <audio> element puts iOS in "playback" mode, so Web Audio is not muted by the switch.
+  function silentWavUrl() {
+    const sr = 8000, n = 800, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+    const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt ");
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    w(36, "data"); v.setUint32(40, n * 2, true);
+    return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  }
+
+  function unlockIOS() {
+    try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
+    try {
+      if (!silentEl) {
+        silentEl = document.createElement("audio");
+        silentEl.src = silentWavUrl();
+        silentEl.loop = true;
+        silentEl.setAttribute("playsinline", "");
+      }
+      const p = silentEl.play();
+      if (p && p.catch) p.catch(() => {});
+    } catch (e) {}
+  }
+
+  async function keepAwake() {
+    try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+  }
+
+  // ---- Audio -------------------------------------------------------------------------------------
+  function ensureContext() {
+    if (ctx) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    ctx = new AC({ latencyHint: "interactive" });
+    gain = ctx.createGain();
+    gain.gain.value = Math.pow($("volume").value / 100, 2);
+    const splitter = ctx.createChannelSplitter(2);
+    analysers = [ctx.createAnalyser(), ctx.createAnalyser()];
+    for (const a of analysers) a.fftSize = 1024;
+    gain.connect(ctx.destination);
+    gain.connect(splitter);
+    splitter.connect(analysers[0], 0);
+    splitter.connect(analysers[1], 1);
+    requestAnimationFrame(drawMeters);
+  }
+
+  function start() {
+    unlockIOS();
+    ensureContext();
+    // A tiny buffer played inside the tap also unlocks audio on old iOS versions
+    const b = ctx.createBuffer(1, 1, 22050), s = ctx.createBufferSource();
+    s.buffer = b; s.connect(ctx.destination); s.start(0);
+    if (ctx.resume) ctx.resume();
+    keepAwake();
+    playing = true; stats.playing = true; nextTime = 0;
+    $("play").classList.add("on");
+    $("play").innerHTML = "PARAR<small>tocando a mix ao vivo</small>";
+    connect();
+  }
+
+  function stop() {
+    playing = false; stats.playing = false;
+    clearTimeout(reconnectTimer);
+    if (ws) { ws.onclose = null; try { ws.close(); } catch (e) {} ws = null; }
+    if (silentEl) silentEl.pause();
+    if (wakeLock) { try { wakeLock.release(); } catch (e) {} wakeLock = null; }
+    if (ctx && ctx.suspend) ctx.suspend();
+    stats.connected = false;
+    $("play").classList.remove("on");
+    $("play").innerHTML = "OUVIR<small>toque para ouvir a mix</small>";
+    setStatus("Parado", "");
+  }
+
+  function connect() {
+    if (!playing) return;
+    setStatus("Conectando…", "warn");
+    const url = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
+    try { ws = new WebSocket(url); } catch (e) { scheduleReconnect(); return; }
+    ws.binaryType = "arraybuffer";
+    ws.onopen = () => { stats.connected = true; setStatus("Conectado — aguardando áudio", "warn"); };
+    ws.onmessage = (ev) => {
+      if (typeof ev.data === "string") {
+        try {
+          const m = JSON.parse(ev.data);
+          if (m.type === "hello") $("rate").textContent = (m.sampleRate / 1000).toFixed(1).replace(".", ",") + " kHz";
+        } catch (e) {}
+        return;
+      }
+      onAudio(ev.data);
+    };
+    ws.onclose = () => { stats.connected = false; scheduleReconnect(); };
+    ws.onerror = () => {};
+  }
+
+  function scheduleReconnect() {
+    if (!playing) return;
+    setStatus("Sem conexão — tentando de novo…", "bad");
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connect, 1000);
+  }
+
+  function onAudio(buf) {
+    lastPacketAt = performance.now();
+    if (!ctx || !playing || buf.byteLength < 16) return;
+    const dv = new DataView(buf);
+    if (dv.getUint8(0) !== 77 || dv.getUint8(1) !== 76 || dv.getUint8(2) !== 86) return; // "MLV"
+    const sr = dv.getUint32(4, true), ch = dv.getUint16(12, true);
+    const pcm = new Int16Array(buf, 16, (buf.byteLength - 16) >> 1);
+    const frames = Math.floor(pcm.length / ch);
+    if (frames <= 0 || ch < 1) return;
+
+    stats.packets++; stats.sampleRate = sr;
+    const ab = ctx.createBuffer(2, frames, sr);
+    const L = ab.getChannelData(0), R = ab.getChannelData(1);
+    const k = 1 / 32768;
+    let pL = 0, pR = 0;
+    for (let i = 0, j = 0; i < frames; i++, j += ch) {
+      const l = pcm[j] * k, r = (ch > 1 ? pcm[j + 1] : pcm[j]) * k;
+      let a = l, b = r;
+      if (mode === "mono") { a = b = 0.5 * (l + r); }
+      else if (mode === "left") { b = l; }
+      else if (mode === "right") { a = r; }
+      L[i] = a; R[i] = b;
+      if (Math.abs(a) > pL) pL = Math.abs(a);
+      if (Math.abs(b) > pR) pR = Math.abs(b);
+    }
+    stats.lastPeak = [pL, pR];
+
+    const now = ctx.currentTime;
+    if (nextTime < now + 0.01) {          // first packet or ran dry: restart the buffer
+      if (nextTime > 0) stats.underruns++;
+      nextTime = now + target;
+    }
+    let ahead = nextTime - now;
+    if (ahead > target + 0.35) {           // too far behind (burst / clock drift): skip to catch up
+      stats.dropped++;
+      return;
+    }
+
+    // Gentle drift correction: up to ±0.2% speed to keep the buffer near its target
+    const rate = 1 + Math.max(-0.002, Math.min(0.002, (ahead - target) * 0.01));
+    const src = ctx.createBufferSource();
+    src.buffer = ab;
+    src.playbackRate.value = rate;
+    src.connect(gain);
+    src.start(nextTime);
+    nextTime += ab.duration / rate;
+    stats.scheduled++;
+    stats.latency = ahead + (ctx.outputLatency || ctx.baseLatency || 0);
+
+    setStatus("Ao vivo", "ok");
+  }
+
+  // ---- Meters and stats --------------------------------------------------------------------------
+  const tmp = new Float32Array(1024);
+  function peakOf(a) {
+    a.getFloatTimeDomainData(tmp);
+    let p = 0;
+    for (let i = 0; i < tmp.length; i++) { const v = Math.abs(tmp[i]); if (v > p) p = v; }
+    return p;
+  }
+  function toWidth(p) {
+    const db = 20 * Math.log10(p + 1e-9);
+    return Math.max(0, Math.min(100, (db + 60) / 60 * 100));
+  }
+  function drawMeters() {
+    if (analysers) {
+      $("mL").style.width = toWidth(peakOf(analysers[0])) + "%";
+      $("mR").style.width = toWidth(peakOf(analysers[1])) + "%";
+    }
+    requestAnimationFrame(drawMeters);
+  }
+  setInterval(() => {
+    if (!playing || !ctx) return;
+    const ahead = Math.max(0, nextTime - ctx.currentTime);
+    $("latency").textContent = Math.round(stats.latency * 1000) + " ms";
+    $("buffer").textContent = Math.round(ahead * 1000) + " ms";
+    $("drops").textContent = String(stats.underruns + stats.dropped);
+    if (stats.connected && performance.now() - lastPacketAt > 1500 && stats.packets > 0)
+      setStatus("Conectado — DAW parada ou sem áudio", "warn");
+  }, 250);
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && playing) {
+      if (ctx && ctx.resume) ctx.resume();
+      keepAwake();
+      nextTime = 0;
+    }
+  });
+  window.addEventListener("error", (e) => stats.errors.push(String(e.message)));
+})();
+</script>
+</body>
+</html>

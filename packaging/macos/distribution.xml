@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>MLiveMIX @VERSION@</title>
+    <welcome file="welcome.html" mime-type="text/html"/>
+    <conclusion file="conclusion.html" mime-type="text/html"/>
+
+    <!-- Native on Apple Silicon and Intel (no Rosetta prompt) -->
+    <options customize="allow" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+    <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+
+    <choices-outline>
+        <line choice="au"/>
+        <line choice="vst3"/>
+    </choices-outline>
+
+    <choice id="au" title="Audio Unit (AU)" start_selected="true"
+            description="Para Logic Pro, GarageBand, Ableton Live, FL Studio e outras DAWs com suporte a AU. Instalado em /Library/Audio/Plug-Ins/Components.">
+        <pkg-ref id="com.mlivemix.mlivemix.au"/>
+    </choice>
+
+    <choice id="vst3" title="VST3" start_selected="true"
+            description="Para FL Studio, Ableton Live, Cubase, Studio One, Reaper e outras DAWs com suporte a VST3. Instalado em /Library/Audio/Plug-Ins/VST3.">
+        <pkg-ref id="com.mlivemix.mlivemix.vst3"/>
+    </choice>
+
+    <pkg-ref id="com.mlivemix.mlivemix.au" version="@VERSION@" onConclusion="none">MLiveMIX-au.pkg</pkg-ref>
+    <pkg-ref id="com.mlivemix.mlivemix.vst3" version="@VERSION@" onConclusion="none">MLiveMIX-vst3.pkg</pkg-ref>
+</installer-gui-script>
