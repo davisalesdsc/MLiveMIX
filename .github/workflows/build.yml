@@ -45,6 +45,10 @@ jobs:
             ./build/MLiveMixTests_artefacts/Release/MLiveMixTests
           fi
 
+      - name: Load the VST3 like a DAW (Linux)
+        if: runner.os == 'Linux'
+        run: ./build/MLiveMixPluginLoadTest_artefacts/Release/MLiveMixPluginLoadTest build/MLiveMIX_artefacts/Release/VST3/MLiveMIX.vst3
+
       # Real browser test: Chromium plays the stream served by the test runner
       - name: Browser end-to-end test (Linux)
         if: runner.os == 'Linux'
@@ -112,6 +116,14 @@ jobs:
           killall -9 AudioComponentRegistrar || true
           auval -v aufx Mlv1 Mlvm
 
+      # Load the INSTALLED plugins the way a DAW does (VST3 + AU), process audio, open the window
+      - name: Load installed plugins like a DAW (macOS Apple Silicon)
+        if: runner.os == 'macOS'
+        run: |
+          uname -m; sw_vers -productVersion
+          ./build/MLiveMixPluginLoadTest_artefacts/Release/MLiveMixPluginLoadTest /Library/Audio/Plug-Ins/VST3/MLiveMIX.vst3
+          ./build/MLiveMixPluginLoadTest_artefacts/Release/MLiveMixPluginLoadTest AU
+
       # Zip on the runner itself so bundle structure and permissions survive
       # (upload-artifact does not preserve file permissions).
       - name: Package
@@ -141,11 +153,42 @@ jobs:
             dist/*.pkg
           if-no-files-found: error
 
+  # Install the released .pkg on an INTEL Mac and load both plugins like a DAW does
+  mac-intel:
+    name: macOS Intel (install .pkg + load like a DAW)
+    needs: build
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: MLiveMIX-macOS
+          path: dist
+
+      - name: Install the .pkg
+        run: |
+          uname -m; sw_vers -productVersion
+          ls -la dist
+          sudo installer -pkg dist/*.pkg -target /
+          killall -9 AudioComponentRegistrar || true
+
+      - name: Build the loader (native x86_64)
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+          cmake --build build --config Release --target MLiveMixPluginLoadTest --parallel 4
+
+      - name: Load VST3 and AU like a DAW
+        run: |
+          ./build/MLiveMixPluginLoadTest_artefacts/Release/MLiveMixPluginLoadTest /Library/Audio/Plug-Ins/VST3/MLiveMIX.vst3
+          ./build/MLiveMixPluginLoadTest_artefacts/Release/MLiveMixPluginLoadTest AU
+          auval -v aufx Mlv1 Mlvm | tail -5
+
   # Every push to main creates/updates the release for the version in CMakeLists.txt
   # (bump VERSION there to start a new release). Pushing a v* tag also works.
   release:
     name: Publish GitHub Release
-    needs: build
+    needs: [ build, mac-intel ]
     if: startsWith(github.ref, 'refs/tags/v') || (github.ref == 'refs/heads/main' && github.event_name == 'push')
     runs-on: ubuntu-24.04
     permissions:

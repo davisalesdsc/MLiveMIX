@@ -106,4 +106,16 @@ if(MLIVEMIX_BUILD_TESTS)
         juce::juce_audio_utils
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
+
+    # Loads the INSTALLED plugin like a DAW does (VST3, and AU on macOS)
+    juce_add_console_app(MLiveMixPluginLoadTest PRODUCT_NAME "MLiveMixPluginLoadTest")
+    target_sources(MLiveMixPluginLoadTest PRIVATE Tests/PluginLoadTest.cpp)
+    target_compile_definitions(MLiveMixPluginLoadTest PRIVATE
+        JUCE_PLUGINHOST_VST3=1
+        JUCE_PLUGINHOST_AU=1
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0)
+    target_link_libraries(MLiveMixPluginLoadTest PRIVATE
+        juce::juce_audio_utils
+        juce::juce_recommended_config_flags)
 endif()
