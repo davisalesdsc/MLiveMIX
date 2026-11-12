@@ -69,6 +69,23 @@ jobs:
           echo "PROJECT_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "label=$LABEL version=$VERSION"
 
+      # Fails the build if the plugin would require a newer macOS than intended
+      # (x86_64: 10.13; arm64: 11.0, the first macOS for Apple Silicon)
+      - name: Check minimum macOS version
+        if: runner.os == 'macOS'
+        run: |
+          for bin in build/MLiveMIX_artefacts/Release/VST3/MLiveMIX.vst3/Contents/MacOS/MLiveMIX \
+                     build/MLiveMIX_artefacts/Release/AU/MLiveMIX.component/Contents/MacOS/MLiveMIX; do
+            for arch in x86_64 arm64; do
+              minos=$(vtool -arch $arch -show-build "$bin" | awk '/minos/ {print $2}')
+              echo "$bin [$arch] minos=$minos"
+              limit=10.13; [ "$arch" = arm64 ] && limit=11.0
+              if [ "$(printf '%s\n%s\n' "$minos" "$limit" | sort -V | tail -1)" != "$limit" ]; then
+                echo "::error::$arch requires macOS $minos (expected <= $limit)"; exit 1
+              fi
+            done
+          done
+
       # Ad-hoc signature so Apple Silicon hosts load the bundles (no Apple account needed)
       - name: Ad-hoc sign (macOS)
         if: runner.os == 'macOS'

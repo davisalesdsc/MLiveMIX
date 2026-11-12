@@ -1,15 +1,14 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(MLiveMIX VERSION 0.1.0 LANGUAGES C CXX)
+# macOS settings MUST come before project(): set afterwards, CMake ignores them and the plugin
+# ends up requiring the macOS version of the build machine (it required macOS 15 in 0.1.0).
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS version")
+set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Universal binary (Apple Silicon + Intel)")
+
+project(MLiveMIX VERSION 0.1.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# Universal binary (Apple Silicon + Intel) on macOS
-if(APPLE AND NOT CMAKE_OSX_ARCHITECTURES)
-    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "" FORCE)
-endif()
-set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS version")
 
 # ---------------------------------------------------------------------------
 # JUCE: downloaded automatically, or a local copy with -DMLIVEMIX_JUCE_DIR=/path/to/JUCE
