@@ -3,6 +3,16 @@
 import WebSocket from "ws";
 
 const base = process.argv[2] || "http://127.0.0.1:8787";
+
+// Behind an HTTPS proxy (e.g. a sandbox), route the WebSockets through it too.
+// (fetch uses the proxy with NODE_USE_ENV_PROXY=1.) Optional: only if https-proxy-agent is installed.
+let agent;
+if (process.env.HTTPS_PROXY && base.startsWith("https")) {
+  try {
+    const { HttpsProxyAgent } = await import("https-proxy-agent");
+    agent = new HttpsProxyAgent(process.env.HTTPS_PROXY);
+  } catch (e) {}
+}
 const wsBase = base.replace(/^http/, "ws");
 const room = "test" + Math.random().toString(36).slice(2, 14) + "abcdefgh";
 const key = "k-" + Math.random().toString(36).slice(2) + "0123456789abcdef";
@@ -15,7 +25,7 @@ function check(ok, what) {
 
 function open(url) {
   return new Promise((resolve) => {
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(url, agent ? { agent } : {});
     const texts = [], bins = [];
     ws.on("message", (data, isBinary) => (isBinary ? bins : texts).push(isBinary ? data : data.toString()));
     ws.on("open", () => resolve({ ws, texts, bins, ok: true }));
