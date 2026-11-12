@@ -139,7 +139,8 @@ MLiveMixAudioProcessorEditor::MLiveMixAudioProcessorEditor (MLiveMixAudioProcess
             // First click asks for confirmation: the old link will stop working
             confirmNewLink = true;
             newLinkButton.setButtonText ("CONFIRMAR NOVO LINK?");
-            juce::Timer::callAfterDelay (4000, [safe = juce::Component::SafePointer<MLiveMixAudioProcessorEditor> (this)]
+            juce::Component::SafePointer<MLiveMixAudioProcessorEditor> safe (this);
+            juce::Timer::callAfterDelay (4000, [safe]
             {
                 if (safe != nullptr && safe->confirmNewLink)
                 {

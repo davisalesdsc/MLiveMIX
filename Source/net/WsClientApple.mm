@@ -65,12 +65,21 @@ namespace
                 task.maximumMessageSize = 1 << 20;
                 [task resume];
 
-                // A ping answered by the server proves the handshake (HTTP 101) succeeded
+                // The relay always sends a first message to the transmitter (the listener count).
+                // Waiting for it proves the handshake (HTTP 101) succeeded; a refusal (403, ...) or a
+                // network error ends the receive with an error instead.
                 dispatch_semaphore_t done = dispatch_semaphore_create (0);
-                auto pingError = std::make_shared<NSError* __strong> (nil);
-                [task sendPingWithPongReceiveHandler: ^(NSError* e)
+                auto firstError = std::make_shared<NSError* __strong> (nil);
+                auto s = shared;
+                [task receiveMessageWithCompletionHandler: ^(NSURLSessionWebSocketMessage* message, NSError* e)
                 {
-                    *pingError = e;
+                    if (e != nil || message == nil)
+                        *firstError = e != nil ? e : [NSError errorWithDomain: @"MLiveMIX" code: -1 userInfo: nil];
+                    else if (message.type == NSURLSessionWebSocketMessageTypeString && message.string != nil)
+                    {
+                        std::lock_guard<std::mutex> l (s->lock);
+                        s->texts.add (juce::String::fromUTF8 (message.string.UTF8String));
+                    }
                     dispatch_semaphore_signal (done);
                 }];
 
@@ -81,9 +90,9 @@ namespace
                     close();
                     return false;
                 }
-                if (*pingError != nil)
+                if (*firstError != nil)
                 {
-                    error = describe (*pingError);
+                    error = describe (*firstError);
                     close();
                     return false;
                 }
