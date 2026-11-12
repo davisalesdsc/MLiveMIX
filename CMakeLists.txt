@@ -63,8 +63,8 @@ set(MLIVEMIX_SOURCES
     third_party/qrcodegen/qrcodegen.cpp)
 
 # Remote listening (internet): the plugin connects out to this relay (see relay/).
-# e.g. -DMLIVEMIX_RELAY_URL=https://mlivemix-relay.<sua-conta>.workers.dev
-set(MLIVEMIX_RELAY_URL "" CACHE STRING "Remote listening relay base URL")
+# Default: the published relay. Override with -DMLIVEMIX_RELAY_URL=... (empty disables REMOTO).
+set(MLIVEMIX_RELAY_URL "https://mlivemix-relay.mlivemix.workers.dev" CACHE STRING "Remote listening relay base URL")
 message(STATUS "MLiveMIX relay: '${MLIVEMIX_RELAY_URL}'")
 
 if(APPLE)

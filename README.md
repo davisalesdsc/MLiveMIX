@@ -44,6 +44,7 @@ Na aba **REMOTO (INTERNET)** do plugin:
 
 Como funciona: o plugin faz uma conexão **de saída** (funciona atrás de qualquer roteador) para um
 servidor na nuvem (`relay/`, Cloudflare Workers + Durable Objects), que repassa o áudio aos ouvintes.
+Servidor publicado: **https://mlivemix-relay.mlivemix.workers.dev** (padrão dos builds).
 
 ### Publicar o servidor (uma vez)
 
