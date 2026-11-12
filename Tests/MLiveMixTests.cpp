@@ -113,14 +113,25 @@ juce::String httpGet (int port, const juce::String& path)
     return c.readAll();
 }
 
-/** Pushes 'seconds' of audio into the tap in 10 ms blocks at roughly real time. */
+/** Pushes 'seconds' of audio into the tap in 10 ms blocks, paced by the real clock (like a DAW's
+    audio thread): if a sleep oversleeps, the next iteration catches up, so the amount of audio
+    always matches the elapsed time. */
 void pushTone (AudioTap& tap, double seconds, double sr, double& phase, bool realTime = true)
 {
     const int block = (int) (sr / 100);
     std::vector<float> l ((size_t) block), r ((size_t) block);
     const int blocks = (int) (seconds * 100);
+    const double start = juce::Time::getMillisecondCounterHiRes();
+
     for (int b = 0; b < blocks; ++b)
     {
+        if (realTime)
+        {
+            const double due = start + b * 10.0;
+            const double now = juce::Time::getMillisecondCounterHiRes();
+            if (due > now)
+                juce::Thread::sleep ((int) (due - now));
+        }
         for (int i = 0; i < block; ++i)
         {
             l[(size_t) i] = 0.5f * (float) std::sin (phase * 440.0);
@@ -128,8 +139,6 @@ void pushTone (AudioTap& tap, double seconds, double sr, double& phase, bool rea
             phase += juce::MathConstants<double>::twoPi / sr;
         }
         tap.push (l.data(), r.data(), block);
-        if (realTime)
-            juce::Thread::sleep (10);
     }
 }
 
@@ -294,7 +303,9 @@ void serverTests()
         if (b.readFrame (f, 500) && f.opcode == ws::binary)
             ++bPackets;
     producer2.join();
-    check (bPackets > 90, "a stalled client does not hold back the others (" + juce::String (bPackets) + " packets in 2.5 s)");
+    check (bPackets > 90, "a stalled client does not hold back the others (" + juce::String (bPackets)
+                              + " packets in 2.5 s; server sent " + juce::String ((juce::int64) server.getPacketsSent())
+                              + " total, tap dropped " + juce::String ((int) tap.getFramesDropped()) + " frames)");
 
     // Abrupt disconnects while audio flows must not crash (SIGPIPE) and must be cleaned up
     sleepy.socket.close();
