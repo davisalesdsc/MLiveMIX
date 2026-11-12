@@ -119,7 +119,7 @@ juce::String httpGet (int port, const juce::String& path)
 /** Pushes 'seconds' of audio into the tap in 10 ms blocks, paced by the real clock (like a DAW's
     audio thread): if a sleep oversleeps, the next iteration catches up, so the amount of audio
     always matches the elapsed time. */
-void pushTone (AudioTap& tap, double seconds, double sr, double& phase, bool realTime = true)
+void pushTone (AudioTap& tap, double seconds, double sr, double& phase, bool realTime = true, int burstMs = 0)
 {
     const int block = (int) (sr / 100);
     std::vector<float> l ((size_t) block), r ((size_t) block);
@@ -130,7 +130,9 @@ void pushTone (AudioTap& tap, double seconds, double sr, double& phase, bool rea
     {
         if (realTime)
         {
-            const double due = start + b * 10.0;
+            // burstMs > 10 simulates a bad Wi-Fi: the audio is released in bursts every burstMs
+            const double due = burstMs > 10 ? start + std::floor (b * 10.0 / burstMs) * burstMs + burstMs
+                                            : start + b * 10.0;
             const double now = juce::Time::getMillisecondCounterHiRes();
             if (due > now)
                 juce::Thread::sleep ((int) (due - now));
@@ -263,7 +265,7 @@ void serverTests()
         const juce::uint32 seq = (juce::uint32) (d[8] | d[9] << 8 | d[10] << 16 | d[11] << 24);
         const int ch = d[12];
         const int frames = (int) (f.payload.getSize() - 16) / (2 * ch);
-        if (frames != 960 || ch != 2) { exact = false; break; }
+        if (frames != 480 || ch != 2) { exact = false; break; }
         if (k > 0 && seq != lastSeq + 1) sequenceOk = false;
         lastSeq = seq;
 
@@ -282,13 +284,13 @@ void serverTests()
 
         for (int i = 0; i < frames; ++i)
         {
-            const size_t idx = (size_t) (offset + k * 960 + i);
+            const size_t idx = (size_t) (offset + k * 480 + i);
             if (idx >= expL.size() || L (i) != expL[idx] || R (i) != expR[idx]) { exact = false; break; }
         }
         ++packets;
     }
     producer.join();
-    check (packets == 20 && exact, "20 packets of 20 ms: every sample identical to the source (16-bit), no gaps");
+    check (packets == 20 && exact, "20 packets of 10 ms: every sample identical to the source (16-bit), no gaps");
     check (sequenceOk, "packet sequence numbers are continuous");
 
     // A client that never reads (phone asleep) must not stall the others
@@ -306,7 +308,7 @@ void serverTests()
         if (b.readFrame (f, 500) && f.opcode == ws::binary)
             ++bPackets;
     producer2.join();
-    check (bPackets > 90, "a stalled client does not hold back the others (" + juce::String (bPackets)
+    check (bPackets > 180, "a stalled client does not hold back the others (" + juce::String (bPackets)
                               + " packets in 2.5 s; server sent " + juce::String ((juce::int64) server.getPacketsSent())
                               + " total, tap dropped " + juce::String ((int) tap.getFramesDropped()) + " frames)");
 
@@ -390,7 +392,7 @@ void remoteTests (const juce::String& relayBase)
         const auto* d = static_cast<const juce::uint8*> (f.payload.getData());
         const juce::uint32 seq = (juce::uint32) (d[8] | d[9] << 8 | d[10] << 16 | d[11] << 24);
         const int frames = (int) (f.payload.getSize() - 16) / 4;
-        if (frames != 4800) { exact = false; break; }
+        if (frames != 1920) { exact = false; break; }
         if (packets > 0 && seq != lastSeq + 1) seqOk = false;
         lastSeq = seq;
         auto L = [d] (int i) { return (juce::int16) (d[16 + i * 4] | d[17 + i * 4] << 8); };
@@ -405,7 +407,7 @@ void remoteTests (const juce::String& relayBase)
         if (offset < 0) { exact = false; break; }
         for (int i = 0; i < frames && exact; ++i)
         {
-            const size_t idx = (size_t) (offset + packets * 4800 + i);
+            const size_t idx = (size_t) (offset + packets * 1920 + i);
             exact = idx < expL.size() && L (i) == expL[idx] && R (i) == expR[idx];
         }
         ++packets;
@@ -413,7 +415,7 @@ void remoteTests (const juce::String& relayBase)
     producer.join();
     check (helloOk, "listener got the sample rate through the relay");
     check (packets == 15 && exact && seqOk,
-           "15 packets of 100 ms via the internet relay: every sample identical, no gaps (" + juce::String (packets) + ")");
+           "15 packets of 40 ms via the internet relay: every sample identical, no gaps (" + juce::String (packets) + ")");
 
     // Another computer (different key) cannot take over the same link
     RemoteLink intruder;
@@ -493,13 +495,15 @@ int main (int argc, char** argv)
     {
         const double seconds = argc > 2 ? juce::String (argv[2]).getDoubleValue() : 20.0;
         const int port = argc > 3 ? juce::String (argv[3]).getIntValue() : 8800;
+        const int burstMs = argc > 4 ? juce::String (argv[4]).getIntValue() : 0;
         AudioTap tap;
         tap.setSampleRate (48000.0);
         StreamServer server (tap);
         if (! server.start (port, 1)) { std::cout << "could not listen on " << port << std::endl; return 1; }
-        std::cout << "serving on http://127.0.0.1:" << server.getPort() << "/ for " << seconds << " s" << std::endl;
+        std::cout << "serving on http://127.0.0.1:" << server.getPort() << "/ for " << seconds << " s"
+                  << (burstMs > 10 ? " (bursts every " + juce::String (burstMs) + " ms)" : juce::String()) << std::endl;
         double phase = 0.0;
-        pushTone (tap, seconds, 48000.0, phase);
+        pushTone (tap, seconds, 48000.0, phase, true, burstMs);
         std::cout << "packets sent: " << server.getPacketsSent() << std::endl;
         server.stop();
         return 0;

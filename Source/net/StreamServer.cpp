@@ -8,8 +8,8 @@ namespace mlm
 namespace
 {
     constexpr int maxRequestBytes = 16 * 1024;
-    constexpr int maxQueuedPackets = 50;   // ~1 s of audio per client before old packets are dropped
-    constexpr int packetMs = 20;
+    constexpr int maxQueuedPackets = 100;  // ~1 s of audio per client before old packets are dropped
+    constexpr int packetMs = 10;           // small packets = low latency on the local network
 
     juce::String httpResponse (const juce::String& status, const juce::String& contentType, size_t contentLength,
                                const juce::String& extraHeaders = {})
@@ -307,7 +307,7 @@ public:
                 pending.clear();
 
             // Never let a backlog build up (e.g. a stalled thread)
-            const size_t maxPending = (size_t) framesPerPacket * 2 * 25;
+            const size_t maxPending = (size_t) framesPerPacket * 2 * 50;
             if (pending.size() > maxPending)
                 pending.erase (pending.begin(), pending.end() - (std::ptrdiff_t) maxPending);
 

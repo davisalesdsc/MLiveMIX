@@ -14,7 +14,7 @@ namespace mlm
       GET /        -> the listening page (embedded HTML)
       GET /status  -> JSON status
       GET /ws      -> WebSocket: one "hello" text message, then binary audio packets
-                      (see ws::makeAudioPacket), ~20 ms each
+                      (see ws::makeAudioPacket), 10 ms each
 
     Threads: one listener (accept), one sender (reads the AudioTap and fans packets out),
     one per client (handshake, its own bounded queue, ping/close). Nothing here ever touches

@@ -92,15 +92,20 @@ jobs:
         run: |
           npm install --no-save playwright@1.48.2
           npx playwright install --with-deps chromium
-          ./build/MLiveMixTests_artefacts/Release/MLiveMixTests --serve 25 18900 &
-          sleep 2
-          node tests/browser-e2e.js 18900
-          node tests/browser-e2e.js 18900 mobile
-          wait
+          T=./build/MLiveMixTests_artefacts/Release/MLiveMixTests
+          # Local network: desktop, phone, and a simulated bad Wi-Fi (audio arriving in 120 ms bursts)
+          for run in "desktop 0" "mobile 0" "mobile 120"; do
+            set -- $run
+            $T --serve 25 18900 $2 &
+            sleep 2
+            node tests/browser-e2e.js 18900 $1 $2
+            wait
+          done
+          # Remote link through the relay
           ROOM=ciRoom${GITHUB_RUN_ID}abcdefgh; KEY=ciKey0123456789abcdefghij
-          ./build/MLiveMixTests_artefacts/Release/MLiveMixTests --serve-remote 14 http://127.0.0.1:8787 $ROOM $KEY &
+          $T --serve-remote 25 http://127.0.0.1:8787 $ROOM $KEY &
           sleep 3
-          node tests/browser-e2e.js "http://127.0.0.1:8787/r/$ROOM"
+          node tests/browser-e2e.js "http://127.0.0.1:8787/r/$ROOM" mobile
           wait
 
       - name: Resolve version

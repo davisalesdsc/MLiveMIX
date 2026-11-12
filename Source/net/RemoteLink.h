@@ -12,7 +12,7 @@ namespace mlm
     and sends the mix there; anyone with the link listens through the relay.
 
     Audio arrives from the stream's sender thread (pushAudio, never from the audio thread),
-    is grouped into 100 ms packets and is only sent while someone is listening remotely.
+    is grouped into 40 ms packets and is only sent while someone is listening remotely.
     The connection is retried automatically while the link is switched on.
 */
 class RemoteLink : private juce::Thread

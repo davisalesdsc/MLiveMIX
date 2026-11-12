@@ -25,7 +25,10 @@ Na primeira vez, o macOS pode perguntar se a DAW pode **aceitar conexões de ent
 
 - **OUVIR / PARAR**, volume e medidor de nível L/R.
 - **ESCUTA:** ESTÉREO, MONO, só L ou só R — para conferir a tradução da mix.
-- **ATRASO:** BAIXO (~0,15 s), NORMAL (~0,25 s) ou ESTÁVEL (~0,6 s, para Wi-Fi fraco).
+- **ATRASO:** **AUTO** (padrão) mede a estabilidade da conexão e usa o menor atraso sem falhas,
+  aumentando sozinho se a rede piorar; ou fixo em BAIXO, NORMAL ou ESTÁVEL.
+  Medido no Chrome: ~0,1 s no Wi-Fi (antes ~0,28 s), ~0,24 s num Wi-Fi ruim simulado, ~0,29 s no Remoto
+  (antes ~0,63 s). Fone Bluetooth no celular acrescenta 0,15–0,3 s.
 - Reconecta sozinha se a rede cair ou se a DAW for reaberta.
 - No iPhone, toca mesmo com a chave de silencioso ligada. Mantenha a tela ligada enquanto ouve.
 
@@ -40,7 +43,7 @@ Na aba **REMOTO (INTERNET)** do plugin:
 - O link é **fixo por projeto**: mande uma vez, vale sempre. **NOVO LINK** invalida o anterior.
 - Só quem tem o link ouve (o link tem 128 bits aleatórios) e só este plugin consegue transmitir
   nele (chave secreta guardada no projeto).
-- O áudio só sai do computador enquanto há alguém ouvindo; atraso típico de 0,5–1 s.
+- O áudio só sai do computador enquanto há alguém ouvindo; atraso típico de 0,3–0,5 s (modo AUTO).
 
 Como funciona: o plugin faz uma conexão **de saída** (funciona atrás de qualquer roteador) para um
 servidor na nuvem (`relay/`, Cloudflare Workers + Durable Objects), que repassa o áudio aos ouvintes.
@@ -71,7 +74,7 @@ DAW Master ──► MLiveMIX (áudio passa intacto) ──► DAW continua toca
                                                     └─ GET /status
 ```
 
-- Áudio sem compressão (PCM 16 bits, taxa da sessão) em pacotes de 20 ms: qualidade de CD ou melhor,
+- Áudio sem compressão (PCM 16 bits, taxa da sessão) em pacotes de 10 ms (40 ms no Remoto): qualidade de CD ou melhor,
   cerca de 1,5 Mbit/s por ouvinte — tranquilo para qualquer Wi-Fi doméstico.
 - Vários ouvintes ao mesmo tempo; um celular lento ou com tela apagada não atrapalha os outros
   nem a DAW (cada ouvinte tem sua própria fila).

@@ -96,12 +96,14 @@
   <section class="card">
     <div class="label">ATRASO</div>
     <div class="seg" id="latSeg">
+      <button data-v="auto" class="sel">AUTO</button>
       <button data-v="0.12">BAIXO</button>
-      <button data-v="0.25" class="sel">NORMAL</button>
+      <button data-v="0.25">NORMAL</button>
       <button data-v="0.6">ESTÁVEL</button>
     </div>
-    <p class="hint">Se o som falhar, use <b>ESTÁVEL</b> (Wi-Fi fraco). No celular, mantenha a tela ligada.
-      No iPhone, aumente o volume pelos botões laterais.</p>
+    <p class="hint"><b>AUTO</b> usa o menor atraso que a sua conexão aguenta sem falhar. Se mesmo assim o som
+      falhar, use <b>ESTÁVEL</b>. Fone Bluetooth acrescenta atraso; com fio é mais rápido.
+      No celular, mantenha a tela ligada.</p>
   </section>
 </main>
 
@@ -110,7 +112,7 @@
   "use strict";
   const $ = (id) => document.getElementById(id);
   const stats = { remote: false, connected: false, packets: 0, underruns: 0, dropped: 0, scheduled: 0, sampleRate: 0,
-                  latency: 0, errors: [], playing: false, lastPeak: [0, 0] };
+                  latency: 0, target: 0, jitter: 0, auto: true, errors: [], playing: false, lastPeak: [0, 0] };
   window.__mlive = stats; // read by automated tests
   stats.remote = /^\/r\//.test(location.pathname);
 
@@ -124,12 +126,56 @@
   const remote = !!roomMatch;
   const wsPath = remote ? "/r/" + roomMatch[1] + "/ws" : "/ws";
   if (remote) {
-    // Internet needs a bigger buffer than Wi-Fi
+    // Internet needs a bigger buffer than Wi-Fi (fixed modes)
     const lat = document.querySelectorAll("#latSeg button");
-    lat[0].dataset.v = "0.3"; lat[1].dataset.v = "0.6"; lat[2].dataset.v = "1.2";
-    target = 0.6;
+    lat[1].dataset.v = "0.3"; lat[2].dataset.v = "0.6"; lat[3].dataset.v = "1.2";
     document.querySelector(".tag").textContent = "ao vivo · remoto";
   }
+
+  // ---- AUTO latency ------------------------------------------------------------------------------
+  // Measures how irregularly packets arrive (jitter) and keeps the smallest buffer that covers it.
+  // Grows at once when the network gets worse, shrinks slowly when it gets better, and adds a margin
+  // after a dropout that fades after 30 s without problems.
+  const AUTO_START = remote ? 0.4 : 0.15, AUTO_MIN = remote ? 0.1 : 0.04, AUTO_MAX = remote ? 1.5 : 0.8;
+  let autoMode = true;
+  let transits = [], mediaPos = 0, lastSeq = -1, lastArrival = 0, lastDur = 0.01;
+  let penalty = 0, lastPenaltyAt = 0, lastShrinkAt = 0, autoStartedAt = 0;
+  target = AUTO_START;
+
+  function resetJitter() {
+    transits = []; mediaPos = 0; lastSeq = -1;
+  }
+
+  function measureArrival(seq, dur) {
+    const t = performance.now() / 1000;
+    // A pause (DAW stopped, reconnect) or a gap in the stream starts a new measurement
+    if (lastSeq < 0 || seq !== ((lastSeq + 1) >>> 0) || t - lastArrival > 0.5) {
+      transits = []; mediaPos = 0;
+    }
+    lastSeq = seq; lastArrival = t; lastDur = dur;
+    mediaPos += dur;
+    transits.push([t, t - mediaPos]);
+    while (transits.length && transits[0][0] < t - 8) transits.shift();
+  }
+
+  function updateAutoTarget() {
+    if (!autoMode || transits.length < 15) return;
+    let lo = Infinity, hi = -Infinity;
+    for (const [, v] of transits) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    const jitter = hi - lo;
+    stats.jitter = jitter;
+    const t = performance.now() / 1000;
+    const want = Math.max(AUTO_MIN, Math.min(AUTO_MAX, jitter * 1.25 + lastDur + 0.015 + penalty));
+    if (want > target) {
+      target = want;                       // worse: grow right away
+      lastShrinkAt = t;
+    } else if (target - want > 0.004 && t - lastShrinkAt > (t - autoStartedAt < 10 ? 1 : 3)) {
+      target = Math.max(want, target - 0.03); // better: shrink in small steps
+      lastShrinkAt = t;
+    }
+    if (penalty > 0 && t - lastPenaltyAt > 30) { penalty = Math.max(0, penalty - 0.02); lastPenaltyAt = t; }
+  }
+  setInterval(updateAutoTarget, 250);
 
   // ---- UI --------------------------------------------------------------------------------------
   function setStatus(text, level) {
@@ -147,7 +193,14 @@
     });
   }
   segment("modeSeg", (v) => { mode = v; });
-  segment("latSeg", (v) => { target = parseFloat(v); nextTime = 0; });
+  segment("latSeg", (v) => {
+    autoMode = v === "auto";
+    stats.auto = autoMode;
+    target = autoMode ? AUTO_START : parseFloat(v);
+    autoStartedAt = performance.now() / 1000;
+    resetJitter();
+    nextTime = 0;
+  });
 
   $("volume").addEventListener("input", () => {
     if (gain) gain.gain.value = Math.pow($("volume").value / 100, 2);
@@ -211,6 +264,9 @@
     if (ctx.resume) ctx.resume();
     keepAwake();
     playing = true; stats.playing = true; nextTime = 0;
+    autoStartedAt = performance.now() / 1000;
+    if (autoMode) target = AUTO_START;
+    resetJitter();
     $("play").classList.add("on");
     $("play").innerHTML = "PARAR<small>tocando a mix ao vivo</small>";
     connect();
@@ -268,7 +324,7 @@
     if (!ctx || !playing || buf.byteLength < 16) return;
     const dv = new DataView(buf);
     if (dv.getUint8(0) !== 77 || dv.getUint8(1) !== 76 || dv.getUint8(2) !== 86) return; // "MLV"
-    const sr = dv.getUint32(4, true), ch = dv.getUint16(12, true);
+    const sr = dv.getUint32(4, true), seq = dv.getUint32(8, true), ch = dv.getUint16(12, true);
     const pcm = new Int16Array(buf, 16, (buf.byteLength - 16) >> 1);
     const frames = Math.floor(pcm.length / ch);
     if (frames <= 0 || ch < 1) return;
@@ -290,19 +346,30 @@
     }
     stats.lastPeak = [pL, pR];
 
+    measureArrival(seq, frames / sr);
+
     const now = ctx.currentTime;
-    if (nextTime < now + 0.01) {          // first packet or ran dry: restart the buffer
-      if (nextTime > 0) stats.underruns++;
+    if (nextTime < now + 0.005) {          // first packet or ran dry: restart the buffer
+      if (nextTime > 0) {
+        stats.underruns++;
+        if (autoMode) {                    // a dropout: keep a little more margin for a while
+          penalty = Math.min(0.5, penalty + 0.03);
+          lastPenaltyAt = performance.now() / 1000;
+          updateAutoTarget();
+        }
+      }
       nextTime = now + target;
     }
     let ahead = nextTime - now;
-    if (ahead > target + 0.35) {           // too far behind (burst / clock drift): skip to catch up
-      stats.dropped++;
+    const excess = ahead - target;
+    if (excess > (autoMode ? Math.max(0.05, 2.5 * ab.duration) : 0.35)) {
+      stats.dropped++;                     // too far behind (burst / smaller target): skip to catch up
       return;
     }
 
-    // Gentle drift correction: up to ±0.2% speed to keep the buffer near its target
-    const rate = 1 + Math.max(-0.002, Math.min(0.002, (ahead - target) * 0.01));
+    // Drift correction keeps the buffer near its target: up to ±0.2% speed, ±0.5% when far off
+    const limit = Math.abs(excess) > 0.02 ? 0.005 : 0.002;
+    const rate = 1 + Math.max(-limit, Math.min(limit, excess * 0.05));
     const src = ctx.createBufferSource();
     src.buffer = ab;
     src.playbackRate.value = rate;
@@ -311,6 +378,7 @@
     nextTime += ab.duration / rate;
     stats.scheduled++;
     stats.latency = ahead + (ctx.outputLatency || ctx.baseLatency || 0);
+    stats.target = target;
 
     setStatus("Ao vivo", "ok");
   }
@@ -348,6 +416,7 @@
       if (ctx && ctx.resume) ctx.resume();
       keepAwake();
       nextTime = 0;
+      resetJitter();
     }
   });
   window.addEventListener("error", (e) => stats.errors.push(String(e.message)));

@@ -18,7 +18,7 @@ ws.on("message", (data, isBinary) => {
   }
   const b = Buffer.from(data);
   const ok = b.toString("ascii", 0, 4) === "MLV1" && b.readUInt32LE(4) === 48000 && b.readUInt16LE(12) === 2
-          && (b.length - 16) / 4 === 4800;
+          && (b.length - 16) / 4 === 1920;
   if (!ok) { badPackets++; return; }
   const seq = b.readUInt32LE(8);
   if (lastSeq >= 0 && seq !== lastSeq + 1) gaps++;
@@ -32,8 +32,8 @@ setTimeout(() => {
   ws.close();
   const result = { url, hello, hostOnline, packets, badPackets, gaps, peak };
   console.log(JSON.stringify(result));
-  // ~10 packets/s; allow for connection time
-  const ok = hello && hello.remote === true && packets >= Number(seconds) * 10 * 0.6 && badPackets === 0 && gaps === 0
+  // 25 packets/s (40 ms); allow for connection time
+  const ok = hello && hello.remote === true && packets >= Number(seconds) * 25 * 0.6 && badPackets === 0 && gaps === 0
           && peak > 16000 && peak <= 16384;
   console.log(ok ? "CLOUD REMOTE CHECK PASSED" : "CLOUD REMOTE CHECK FAILED");
   process.exit(ok ? 0 : 1);

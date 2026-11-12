@@ -6,7 +6,7 @@ namespace mlm
 {
 namespace
 {
-    constexpr int packetMs = 100;           // fewer, bigger messages over the internet
+    constexpr int packetMs = 40;            // internet: a balance between latency and message count
     constexpr int maxPendingSeconds = 2;    // never keep more than this if the network stalls
 }
 
