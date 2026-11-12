@@ -81,7 +81,9 @@ jobs:
           for bin in build/MLiveMIX_artefacts/Release/VST3/MLiveMIX.vst3/Contents/MacOS/MLiveMIX \
                      build/MLiveMIX_artefacts/Release/AU/MLiveMIX.component/Contents/MacOS/MLiveMIX; do
             for arch in x86_64 arm64; do
-              minos=$(vtool -arch $arch -show-build "$bin" | awk '/minos/ {print $2}')
+              # LC_BUILD_VERSION prints "minos X"; older targets (10.13) use LC_VERSION_MIN_MACOSX ("version X")
+              minos=$(vtool -arch $arch -show-build "$bin" | awk '$1 == "minos" || $1 == "version" {print $2; exit}')
+              if [ -z "$minos" ]; then echo "::error::could not read the minimum macOS of $bin [$arch]"; exit 1; fi
               echo "$bin [$arch] minos=$minos"
               limit=10.13; [ "$arch" = arm64 ] && limit=11.0
               if [ "$(printf '%s\n%s\n' "$minos" "$limit" | sort -V | tail -1)" != "$limit" ]; then

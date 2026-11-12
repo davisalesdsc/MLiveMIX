@@ -95,9 +95,20 @@ int main (int argc, char** argv)
                 continue;
             const juce::String req = "GET /status HTTP/1.1\r\nHost: localhost\r\n\r\n";
             s.write (req.toRawUTF8(), (int) req.getNumBytesAsUTF8());
-            char buf[2048] = {};
-            if (s.waitUntilReady (true, 2000) == 1)
-                reply = juce::String (buf, (size_t) juce::jmax (0, s.read (buf, sizeof (buf) - 1, false)));
+            // Read until the server closes the connection (header and body may arrive separately)
+            juce::MemoryBlock data;
+            char buf[2048];
+            const auto end = juce::Time::getMillisecondCounter() + 3000;
+            while (juce::Time::getMillisecondCounter() < end)
+            {
+                if (s.waitUntilReady (true, 100) != 1)
+                    continue;
+                const int n = s.read (buf, (int) sizeof (buf), false);
+                if (n <= 0)
+                    break;
+                data.append (buf, (size_t) n);
+            }
+            reply = data.toString();
             s.close();
         }
         std::cout << "server: " << (reply.contains ("MLiveMIX") ? "answering" : "NOT answering") << std::endl;
